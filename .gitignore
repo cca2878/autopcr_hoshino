@@ -1,0 +1,18 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+
+# 两套隔离环境
+.venv-hoshino/
+.venv-autopcr/
+.python-version
+
+# 运行期产物
+*.log
+.autopcr_hoshino_port
+
+# 原生代码崩溃产生的转储
+core
+core.[0-9]*

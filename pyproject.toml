@@ -1,0 +1,19 @@
+[tool.ruff]
+# 兼容层与协议层需运行在 HoshinoBot 所用的 Python 3.8 上，
+# 以最低版本为准做静态检查，避免引入更高版本才有的语法。
+target-version = "py38"
+line-length = 100
+exclude = [".venv-hoshino", ".venv-autopcr"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "C4"]
+ignore = [
+    # 命令解析管道沿用宿主插件的调用形式，在关键字参数之后展开位置参数。
+    "B026",
+]
+
+[tool.ruff.lint.per-file-ignores]
+# 测试脚本需要先补齐搜索路径再导入项目模块。
+"tests/*" = ["E402"]
+# 指令说明是面向用户展示的原文，不按行宽折断。
+"catalog.py" = ["E501"]
