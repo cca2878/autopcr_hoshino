@@ -17,6 +17,39 @@ def _env(name: str, default: str = "") -> str:
     return os.getenv(name, default).strip()
 
 
+#: 未指定 autopcr 位置时，是否自动取得源码并准备运行环境。
+AUTO_PROVISION = _env("AUTOPCR_HOSHINO_AUTO_PROVISION", "true").lower() not in (
+    "0",
+    "false",
+    "no",
+)
+
+#: 自动准备时使用的仓库地址。
+AUTOPCR_REPO = _env("AUTOPCR_HOSHINO_AUTOPCR_REPO", "https://github.com/cc004/autopcr")
+
+#: 自动准备时检出的分支或标签，留空则使用远端默认分支。
+AUTOPCR_REF = _env("AUTOPCR_HOSHINO_AUTOPCR_REF")
+
+#: 每次启动时是否尝试更新已取得的源码。默认关闭，避免上游改动在无人值守时生效。
+AUTO_UPDATE = _env("AUTOPCR_HOSHINO_AUTO_UPDATE", "false").lower() not in (
+    "0",
+    "false",
+    "no",
+    "",
+)
+
+#: 自动准备时源码的存放位置。账号数据与母数据位于其下的 cache 目录。
+MANAGED_ROOT = _env("AUTOPCR_HOSHINO_MANAGED_ROOT", str(PROJECT_ROOT / ".autopcr"))
+
+#: 自动准备时运行环境的存放位置。
+MANAGED_VENV = _env(
+    "AUTOPCR_HOSHINO_MANAGED_VENV", str(PROJECT_ROOT / ".venv-autopcr")
+)
+
+#: 自动准备运行环境时使用的 Python 版本。
+AUTOPCR_PYTHON_VERSION = _env("AUTOPCR_HOSHINO_AUTOPCR_PYTHON_VERSION", "3.10")
+
+
 def wrapper_python() -> str:
     """运行 wrapper 的解释器。该解释器所在环境需安装 autopcr 的依赖。"""
     return _env(

@@ -16,3 +16,6 @@ __pycache__/
 # 原生代码崩溃产生的转储
 core
 core.[0-9]*
+
+# 自动准备的 autopcr 源码与数据
+.autopcr/

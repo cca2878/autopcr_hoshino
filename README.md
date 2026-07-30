@@ -49,33 +49,43 @@ autopcr 与命令实现同在 wrapper 进程内，彼此为直接调用，不经
 
 ## 部署
 
-### 1. 准备 autopcr 运行环境
+把本目录放入 HoshinoBot 的 `hoshino/modules/`，在 `hoshino/config/__bot__.py` 的 `MODULES_ON` 中加入 `autopcr_hoshino`，启动机器人即可。
 
-autopcr 的源码需单独存放，不放在 HoshinoBot 的模块目录内。
+首次启动时会自动取得 autopcr 源码、创建运行环境、安装依赖并下载网页端前端资源。该过程在后台进行，不阻塞机器人启动，期间收到的命令会提示服务尚未就绪。准备进度与失败原因均记录在日志中。
+
+自动准备需要 `git`，以及 `uv` 或一个 Python 3.10 解释器之一。日志会在启动时列出这些程序的可用状况。
+
+### 自行管理环境
+
+指定 `AUTOPCR_HOSHINO_AUTOPCR_ROOT` 即视为自行管理，此时不会自动取得源码或改动环境：
 
 ```bash
 uv venv --python 3.10 .venv-autopcr
 uv pip install --python .venv-autopcr/bin/python -r <autopcr 目录>/requirements.txt
+export AUTOPCR_HOSHINO_AUTOPCR_ROOT=/path/to/autopcr
 ```
 
 网页端的前端资源不随源码分发，需在 autopcr 目录下执行一次 `python _download_web.py` 取得。缺少该资源时接口仍可用，页面会返回 404。
 
-### 2. 放置本项目
+### 数据位置
 
-把本目录放入 HoshinoBot 的 `hoshino/modules/`，并在 `hoshino/config/__bot__.py` 的 `MODULES_ON` 中加入 `autopcr_hoshino`。
+账号配置、母数据与运行结果位于 autopcr 源码目录下的 `cache` 与 `result`，自动准备时即 `<项目>/.autopcr/`。备份账号时取 `cache` 目录。
 
-### 3. 配置
+源码更新只做快进式合并，且在检测到本地改动时跳过，不会触碰上述目录。
 
-至少需要指定 autopcr 源码位置：
-
-```bash
-export AUTOPCR_HOSHINO_AUTOPCR_ROOT=/path/to/autopcr
-```
+### 配置
 
 | 环境变量 | 默认值 | 说明 |
 |---|---|---|
-| `AUTOPCR_HOSHINO_AUTOPCR_ROOT` | 空 | autopcr 源码根目录，即包含 `autopcr` 包的那一层 |
-| `AUTOPCR_HOSHINO_PYTHON` | `<项目>/.venv-autopcr/bin/python` | 运行 wrapper 的解释器 |
+| `AUTOPCR_HOSHINO_AUTO_PROVISION` | `true` | 未指定源码位置时是否自动准备 |
+| `AUTOPCR_HOSHINO_AUTOPCR_REPO` | `https://github.com/cc004/autopcr` | 自动准备时使用的仓库 |
+| `AUTOPCR_HOSHINO_AUTOPCR_REF` | 空 | 检出的分支或标签，留空则用远端默认分支 |
+| `AUTOPCR_HOSHINO_AUTO_UPDATE` | `false` | 每次启动是否尝试更新源码 |
+| `AUTOPCR_HOSHINO_MANAGED_ROOT` | `<项目>/.autopcr` | 自动准备时源码与数据的位置 |
+| `AUTOPCR_HOSHINO_MANAGED_VENV` | `<项目>/.venv-autopcr` | 自动准备时运行环境的位置 |
+| `AUTOPCR_HOSHINO_AUTOPCR_ROOT` | 空 | 自行管理时的 autopcr 源码根目录 |
+| `AUTOPCR_HOSHINO_PYTHON` | `<项目>/.venv-autopcr/bin/python` | 自行管理时运行 wrapper 的解释器 |
+| `AUTOPCR_HOSHINO_VERIFY_REGISTER` | `true` | 网页端注册是否要求号码在机器人所在的群内 |
 | `AUTOPCR_HOSHINO_WEB_PROXY` | `true` | 是否在宿主框架上提供网页端转发 |
 | `AUTOPCR_HOSHINO_WEB_PREFIX` | `/daily` | 网页端路径前缀 |
 | `AUTOPCR_HOSHINO_WEB_PORT` | `0` | wrapper 网页端端口，`0` 表示由系统分配 |
@@ -97,10 +107,6 @@ autopcr 自身的环境变量原样透传给 wrapper 进程。
 
 `导出` 使结果以表格文件上传到群，`群` 使操作对象为本群共用账号。昵称可省略，省略时使用默认账号；`所有` 表示该号码下的全部账号，`批量` 表示网页端已勾选的账号。
 
-## 与同进程部署的差异
-
-网页端的注册接口不再校验注册者是否在机器人所在的群内。该校验原先依赖从 autopcr 反向导入宿主插件中的函数，跨进程后该导入路径不存在。如需限制注册，请通过 autopcr 的 `AUTOPCR_SERVER_ALLOW_REGISTER` 关闭公开注册。
-
 ## 开发与验证
 
 ```bash
@@ -108,6 +114,7 @@ make venv-autopcr    # 创建运行 autopcr 的环境
 make venv-hoshino    # 创建模拟宿主框架的环境，仅验证需要
 make check           # 静态检查、双环境语法检查、全部实测
 make test-autopcr    # 拉起真实的 autopcr 验证网页端与转发
+make test-provision  # 从零取得源码、建环境并拉起 wrapper
 ```
 
 实测各自覆盖一个方面：
@@ -117,6 +124,7 @@ make test-autopcr    # 拉起真实的 autopcr 验证网页端与转发
 - `tests/proxy_check.py` 在 Quart 0.14 上验证转发，重点是事件流边收边发而非整体缓冲。
 - `tests/hoshino_load_check.py` 在临时目录中搭建最小的 HoshinoBot 部署，验证模块加载、服务注册、命令触发器与前缀匹配优先级。
 - `tests/orphan_check.py` 强制终止宿主进程，验证 wrapper 随之退出而非成为孤儿进程。
-- `tests/autopcr_boot_check.py` 启动真实的 autopcr，验证网页端可用、端口上报以及经转发端点的访问。该项需要 autopcr 源码，其余各项不需要。
+- `tests/autopcr_boot_check.py` 启动真实的 autopcr，验证网页端可用、端口上报、经转发端点的访问以及注册接口的号码校验。
+- `tests/provision_check.py` 从零取得源码、创建环境、安装依赖，并用该环境拉起 wrapper。
 
-实测均不改动参考仓库，临时文件写入系统临时目录。
+`make test` 涵盖的前五项不需要 autopcr；`test-autopcr` 需要现成的 autopcr 源码，`test-provision` 需要 `git` 与可克隆的仓库。实测均不改动参考仓库，产物写入系统临时目录。

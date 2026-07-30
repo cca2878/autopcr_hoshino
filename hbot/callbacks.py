@@ -71,9 +71,7 @@ class CallbackHandler:
         成员名单按群拉取一次即可覆盖全部待判定号码，
         因此这里一次性完成判定，而不是逐个号码重复拉取。
         """
-        import nonebot
-
-        bot = nonebot.get_bot()
+        bot = self._service.bot
         enable_groups = await self._service.get_enable_groups()
 
         known_members = set()

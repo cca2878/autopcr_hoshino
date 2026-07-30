@@ -34,6 +34,49 @@ def check(condition, description):
         print(f"  [失败] {description}")
 
 
+class FakeService:
+    """提供群成员名单，供号码校验使用。"""
+
+    def __init__(self, groups):
+        self._groups = groups
+        self.bot = self
+
+    async def get_enable_groups(self):
+        return {gid: ["self"] for gid in self._groups}
+
+    async def get_group_member_list(self, group_id, self_id=None):
+        return [{"user_id": qq} for qq in self._groups.get(group_id, [])]
+
+
+async def check_register_guard(port, groups):
+    """注册接口应拒绝不在群内的号码。"""
+    import aiohttp
+
+    base = f"http://127.0.0.1:{port}/daily"
+    timeout = aiohttp.ClientTimeout(total=15)
+    headers = {"App-Version": "1.7"}
+    async with aiohttp.ClientSession(timeout=timeout, headers=headers) as session:
+        async with session.post(
+            base + "/api/register", json={"qq": "99999999", "password": "x" * 8}
+        ) as response:
+            body = await response.text()
+            check(
+                response.status == 400 and "无效的QQ" in body,
+                f"群外号码被拒绝：{response.status} {body[:30]}",
+            )
+
+        # 群内号码应通过校验，进入 autopcr 自身的注册流程。
+        insider = str(next(iter(groups.values()))[0])
+        async with session.post(
+            base + "/api/register", json={"qq": insider, "password": "x" * 8}
+        ) as response:
+            body = await response.text()
+            check(
+                "无效的QQ" not in body,
+                f"群内号码通过校验：{response.status} {body[:40]}",
+            )
+
+
 async def check_web(port):
     """检验网页端接口可用。
 
@@ -117,7 +160,10 @@ async def main():
     # 使用产品代码中的回调处理器，端口上报走真实路径。
     # 该路径只需要监督器本身，无需宿主框架的服务与会话表。
     state = {}
-    supervisor = Supervisor(CallbackHandler(None, None, lambda: state.get("supervisor")))
+    groups = {20001: ["10001", "10002"]}
+    supervisor = Supervisor(
+        CallbackHandler(FakeService(groups), None, lambda: state.get("supervisor"))
+    )
     state["supervisor"] = supervisor
     await supervisor.start()
     check(await supervisor.wait_ready(120), "wrapper 完成连接与认证")
@@ -137,6 +183,9 @@ async def main():
 
         print("\n[4] 经转发端点访问")
         await check_through_proxy(supervisor)
+
+        print("\n[5] 注册接口的号码校验")
+        await check_register_guard(supervisor.web_port, groups)
     finally:
         await supervisor.stop()
 

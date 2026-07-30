@@ -3,19 +3,21 @@ PYTHON_AUTOPCR := .venv-autopcr/bin/python
 AUTOPCR_ROOT ?= ../ref/autopcr_latest
 HOSHINO_ROOT ?= ../ref/HoshinoBot
 
-.PHONY: help lint test test-autopcr check venv-autopcr venv-hoshino compile clean
+.PHONY: help lint test test-autopcr test-provision check venv-autopcr venv-hoshino compile clean
 
 help:
 	@echo "lint          静态检查"
 	@echo "compile       在两套环境下分别做语法检查"
 	@echo "test          运行不依赖 autopcr 的实测"
 	@echo "test-autopcr  拉起真实的 autopcr 并验证网页端与转发"
+	@echo "test-provision 从零取得源码、建环境并拉起 wrapper"
 	@echo "check         lint + compile + test"
 	@echo "venv-autopcr  创建运行 autopcr 的环境（部署所需）"
 	@echo "venv-hoshino  创建模拟宿主框架的环境（仅验证所需）"
 
+# 显式限定检查范围：即使从其他目录调用，也不会波及本项目之外的代码。
 lint:
-	ruff check .
+	ruff check $(CURDIR)
 
 compile:
 	$(PYTHON_HOSHINO) -m compileall -q hbot protocol catalog.py entry.py __init__.py tests
@@ -27,6 +29,9 @@ test:
 	$(PYTHON_HOSHINO) tests/proxy_check.py
 	$(PYTHON_HOSHINO) tests/hoshino_load_check.py
 	$(PYTHON_HOSHINO) tests/orphan_check.py
+
+test-provision:
+	$(PYTHON_HOSHINO) tests/provision_check.py
 
 test-autopcr:
 	AUTOPCR_HOSHINO_AUTOPCR_ROOT=$(abspath $(AUTOPCR_ROOT)) \

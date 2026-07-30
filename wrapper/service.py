@@ -30,6 +30,18 @@ class WrapperService:
         if self._peer is not None:
             self._peer.notify("report_web_port", port=port)
 
+    async def is_valid_qq(self, qq: str) -> bool:
+        """询问兼容层，该号码是否仍在机器人所在的群内。
+
+        该判定不属于任何一次消息事件，因此不携带会话编号。
+        连接不可用时判定为无效：此时无法确认号码归属，放行会让任何人都能注册。
+        """
+        if self._peer is None:
+            logger.warning("与兼容层的连接不可用，拒绝号码 %s 的注册", qq)
+            return False
+        invalid = await self._peer.call("filter_invalid_qq", session_id=None, qqs=[qq])
+        return not invalid
+
     async def handle(self, method: str, params: Dict[str, Any]) -> Any:
         if method == "ping":
             return {"ready": True, "web_port": self._web_port}

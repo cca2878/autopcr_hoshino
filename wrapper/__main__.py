@@ -42,7 +42,11 @@ async def main() -> int:
 
     tasks = [asyncio.ensure_future(peer.run())]
     if config.AUTOPCR_ENABLED:
-        tasks.append(asyncio.ensure_future(runtime.run(service.report_web_port)))
+        tasks.append(
+            asyncio.ensure_future(
+                runtime.run(service.report_web_port, service.is_valid_qq)
+            )
+        )
     else:
         logger.warning("autopcr 未启用，仅提供通信能力")
 

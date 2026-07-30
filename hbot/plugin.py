@@ -9,7 +9,7 @@ import os
 import socket
 
 from ..catalog import COMMAND_PREFIX, FULLMATCH_COMMANDS, PREFIX_COMMANDS, SV_HELP
-from . import config
+from . import config, provision
 from .callbacks import CallbackHandler
 from .event import SessionRegistry, build_payload
 from .proxy import WebProxy
@@ -71,8 +71,15 @@ def setup():
     )
 
     sessions = SessionRegistry()
+    provisioner = None
+    if provision.is_managed():
+        provisioner = provision.provision
+        logger.info(
+            "未指定 autopcr 位置，将自动准备（%s）", provision.describe_requirements()
+        )
     supervisor = Supervisor(
-        CallbackHandler(service, sessions, lambda: _state.get("supervisor"))
+        CallbackHandler(service, sessions, lambda: _state.get("supervisor")),
+        provisioner=provisioner,
     )
     _state["supervisor"] = supervisor
     _state["service"] = service

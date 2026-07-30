@@ -45,8 +45,9 @@ class WrapperUnavailable(Exception):
 class Supervisor:
     """维护与 wrapper 的连接，并在其退出后重新拉起。"""
 
-    def __init__(self, handler):
+    def __init__(self, handler, provisioner=None):
         self._handler = handler
+        self._provisioner = provisioner
         self._key = generate_key()
         self._server = None
         self._peer = None  # type: Optional[Peer]
@@ -55,6 +56,10 @@ class Supervisor:
         self._ready = asyncio.Event()
         self._stopping = False
         self._supervise_task = None
+        #: 自动准备得到的源码目录与解释器，未启用自动准备时为 ``None``。
+        self._provisioned = None  # type: Optional[tuple]
+        #: 准备失败的原因，供命令处理器向用户说明。
+        self._provision_error = None  # type: Optional[str]
 
     # ---------------------------------------------------------------- 对外接口
 
@@ -75,6 +80,10 @@ class Supervisor:
         """向 wrapper 发起调用，未就绪时抛出 :class:`WrapperUnavailable`。"""
         peer = self._peer
         if peer is None:
+            if self._provision_error is not None:
+                raise WrapperUnavailable(
+                    f"autopcr 环境准备失败：{self._provision_error}"
+                )
             raise WrapperUnavailable("autopcr 服务尚未就绪")
         try:
             return await peer.call(method, **params)
@@ -147,7 +156,7 @@ class Supervisor:
         # 搜索路径指向项目所在目录的上一级，使 wrapper 能以本项目的包名被导入，
         # 从而与在宿主框架中被加载时使用同一套相对导入。
         search_path = [str(config.PROJECT_ROOT.parent)]
-        autopcr_root = config.autopcr_root()
+        autopcr_root = self._autopcr_root()
         if autopcr_root:
             search_path.append(autopcr_root)
         existing = env.get("PYTHONPATH")
@@ -156,13 +165,49 @@ class Supervisor:
         env["PYTHONPATH"] = os.pathsep.join(search_path)
         return env
 
+    def _autopcr_root(self) -> str:
+        """autopcr 源码目录。显式配置优先于自动准备的结果。"""
+        configured = config.autopcr_root()
+        if configured:
+            return configured
+        return self._provisioned[0] if self._provisioned else ""
+
+    def _python(self) -> str:
+        """运行 wrapper 的解释器。自动准备的结果仅在未显式配置时生效。"""
+        if self._provisioned and not os.getenv("AUTOPCR_HOSHINO_PYTHON", "").strip():
+            return self._provisioned[1]
+        return config.wrapper_python()
+
+    async def _provision(self) -> bool:
+        """在拉起 wrapper 之前准备源码与运行环境。"""
+        if self._provisioner is None:
+            return True
+        try:
+            self._provisioned = await self._provisioner()
+            self._provision_error = None
+            logger.info("autopcr 环境已就绪：%s", self._provisioned[0])
+            return True
+        except Exception as exc:
+            self._provision_error = str(exc)
+            logger.error("autopcr 环境准备失败：%s", exc)
+            return False
+
     async def _supervise(self, port: int) -> None:
         module = f"{config.PACKAGE_NAME}.wrapper"
         # 连续失败时逐次延长重启间隔，避免配置错误导致进程被反复拉起。
         # 一旦某次运行持续足够长，视为已恢复，间隔重置。
         delay = config.RESTART_DELAY
+
         while not self._stopping:
-            python = config.wrapper_python()
+            if await self._provision():
+                break
+            logger.error("%s 秒后重试准备 autopcr 环境", delay)
+            await asyncio.sleep(delay)
+            delay = min(delay * 2, config.MAX_RESTART_DELAY)
+        delay = config.RESTART_DELAY
+
+        while not self._stopping:
+            python = self._python()
             logger.info("启动 wrapper：%s -m %s", python, module)
             started_at = asyncio.get_event_loop().time()
             try:

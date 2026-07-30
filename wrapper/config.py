@@ -32,6 +32,13 @@ WEB_PORT = int(os.getenv("AUTOPCR_HOSHINO_WEB_PORT", "0"))
 #: 网页端监听队列长度。
 WEB_BACKLOG = int(os.getenv("AUTOPCR_HOSHINO_WEB_BACKLOG", "128"))
 
+#: 是否要求注册者所用号码在机器人所在的群内。
+VERIFY_REGISTER = os.getenv("AUTOPCR_HOSHINO_VERIFY_REGISTER", "true").lower() not in (
+    "0",
+    "false",
+    "no",
+)
+
 #: 是否启动 autopcr。关闭后 wrapper 仅提供通信能力，用于验证与排障。
 AUTOPCR_ENABLED = os.getenv("AUTOPCR_HOSHINO_ENABLE_AUTOPCR", "true").lower() not in (
     "0",

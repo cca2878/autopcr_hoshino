@@ -38,7 +38,37 @@ def _bind_web_socket() -> Tuple[socket.socket, int]:
     return sock, sock.getsockname()[1]
 
 
-async def run(on_web_port: Optional[Callable[[int], None]] = None) -> None:
+def _install_register_guard(app, is_valid_qq: Callable) -> None:
+    """在注册接口前加一道号码校验。
+
+    autopcr 自带的校验会从其包外反向导入宿主插件中的函数，那种导入形式要求 autopcr
+    作为子包存在，在独立进程中不成立。这里改为在应用层前置拦截，判定本身经通信链路
+    交由兼容层完成，效果与原先一致。
+    """
+    from quart import request
+
+    @app.before_request
+    async def verify_register_qq():
+        if request.method != "POST" or not request.path.endswith("/api/register"):
+            return None
+        try:
+            data = await request.get_json()
+        except Exception:
+            return None
+        qq = str((data or {}).get("qq", "")).strip()
+        if not qq:
+            # 入参不完整，交由 autopcr 自己给出提示。
+            return None
+        if not await is_valid_qq(qq):
+            logger.info("拒绝注册：号码 %s 不在机器人所在的群内", qq)
+            return "无效的QQ", 400
+        return None
+
+
+async def run(
+    on_web_port: Optional[Callable[[int], None]] = None,
+    is_valid_qq: Optional[Callable] = None,
+) -> None:
     """启动 autopcr 并持续运行。"""
     from autopcr.db.dbstart import db_start
     from autopcr.http_server.httpserver import HttpServer
@@ -48,9 +78,12 @@ async def run(on_web_port: Optional[Callable[[int], None]] = None) -> None:
 
     sock, port = _bind_web_socket()
 
-    # qq_mod 会让注册接口反向导入宿主插件包中的号码校验函数，该导入路径在独立进程中不存在。
     server = HttpServer(host=config.WEB_HOST, port=port, qq_mod=False)
     server.quart.register_blueprint(server.app)
+
+    if is_valid_qq is not None and config.VERIFY_REGISTER:
+        _install_register_guard(server.quart, is_valid_qq)
+        logger.info("注册接口将校验号码是否在机器人所在的群内")
 
     hypercorn_config = Config()
     hypercorn_config.bind = [f"fd://{sock.fileno()}"]
