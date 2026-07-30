@@ -74,7 +74,7 @@ def wrapper_python() -> str:
 def autopcr_root() -> str:
     """autopcr 源码根目录，即包含 ``autopcr`` 包的那一层。
 
-    指定该项即视为使用者自行管理环境，自动准备不再进行。
+    指定该项即视为使用者自行管理环境，自动准备不进行。
     """
     return settings.get("autopcr_root")
 

@@ -1,4 +1,4 @@
-"""反向代理实测。
+"""反向代理测试。
 
 在装有宿主框架依赖的解释器（Python 3.8 / Quart 0.14）中运行，验证转发端点
 能够在该版本的框架上正常工作，重点在于事件流是否**边收边发**——
@@ -17,6 +17,87 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspa
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 UPSTREAM_PYTHON = os.path.join(PROJECT_ROOT, ".venv-autopcr", "bin", "python")
 
+#: 上游服务的源码。它模拟 autopcr 网页端提供的几类响应：服务端推送的事件流、
+#: 普通 JSON、大体积响应与请求回显。运行时写入临时目录，作为子进程启动，
+#: 因此不作为独立文件进入版本控制。
+UPSTREAM_SOURCE = """
+import asyncio
+import socket
+import sys
+
+from quart import Quart, Response, request
+
+app = Quart(__name__)
+
+
+@app.route("/daily/api/sse")
+async def sse():
+    async def generate():
+        for index in range(5):
+            yield f"id: {index}\\ndata: message-{index}\\n\\n".encode()
+            await asyncio.sleep(0.2)
+
+    return Response(
+        generate(),
+        headers={
+            "Content-Type": "text/event-stream",
+            "Cache-Control": "no-cache",
+            "X-Upstream-Marker": "sse",
+        },
+    )
+
+
+@app.route("/daily/api/json")
+async def json_endpoint():
+    return {"ok": True, "text": "日常清理完毕"}, 200
+
+
+@app.route("/daily/api/big")
+async def big():
+    return Response(
+        b"X" * (5 * 1024 * 1024), headers={"Content-Type": "application/octet-stream"}
+    )
+
+
+@app.route("/daily/api/echo", methods=["POST"])
+async def echo():
+    body = await request.get_data()
+    return Response(
+        body,
+        status=201,
+        headers={
+            "Content-Type": request.headers.get("Content-Type", ""),
+            "X-Echo-Length": str(len(body)),
+        },
+    )
+
+
+@app.route("/daily/")
+@app.route("/daily/<path:path>")
+async def index(path=""):
+    return Response(f"index:{path}", headers={"Content-Type": "text/plain"})
+
+
+async def main(port_file):
+    from hypercorn.asyncio import serve
+    from hypercorn.config import Config
+
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    sock.bind(("127.0.0.1", 0))
+    with open(port_file, "w") as fp:
+        fp.write(str(sock.getsockname()[1]))
+
+    config = Config()
+    config.bind = [f"fd://{sock.fileno()}"]
+    config.accesslog = None
+    await serve(app, config)
+
+
+asyncio.run(main(sys.argv[1]))
+"""
+
+
 failures = []
 
 
@@ -29,15 +110,14 @@ def check(condition, description):
 
 
 def start_upstream():
-    """启动上游服务并返回其进程与端口。"""
-    handle, port_file = tempfile.mkstemp(suffix=".port")
-    os.close(handle)
-    os.unlink(port_file)
+    """把上游服务写入临时目录并启动，返回其进程与端口。"""
+    workspace = tempfile.mkdtemp(prefix="proxy-upstream-")
+    script = os.path.join(workspace, "upstream.py")
+    with open(script, "w", encoding="utf-8") as fp:
+        fp.write(UPSTREAM_SOURCE)
+    port_file = os.path.join(workspace, "port")
 
-    process = subprocess.Popen(
-        [UPSTREAM_PYTHON, os.path.join(PROJECT_ROOT, "tests", "proxy_upstream.py"), port_file],
-        cwd=PROJECT_ROOT,
-    )
+    process = subprocess.Popen([UPSTREAM_PYTHON, script, port_file], cwd=workspace)
     deadline = time.time() + 60
     while time.time() < deadline:
         if os.path.exists(port_file):

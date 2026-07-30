@@ -14,15 +14,15 @@ autopcr 与 HoshinoBot 对同一批依赖提出了互不相容的版本要求，
 | Pillow | `~=9.1.0` | `~=9.5.0` |
 | Python | 3.8 | `>=3.10,<3.11` |
 
-四对约束均无公共解，可用 `scripts/verify_conflict.sh` 复核。autopcr 的网页端依赖 `quart-auth`、`quart-rate-limiter`、`quart-compress`，这三者都要求 Quart 0.19 的接口，因此把 autopcr 的蓝图注册到 HoshinoBot 的 Quart 0.14 应用上并不可行。
+四对约束均无公共解，可用 `uv pip install --dry-run -r <HoshinoBot>/requirements.txt -r <autopcr>/requirements.txt` 自行复核。autopcr 的网页端依赖 `quart-auth`、`quart-rate-limiter`、`quart-compress`，这三者都要求 Quart 0.19 的接口，无法注册到 HoshinoBot 的 Quart 0.14 应用上。
 
-本项目把 autopcr 移入独立解释器运行的子进程，在 HoshinoBot 一侧只保留消息收发与权限判定。用户可见的行为不变：命令、参数、输出图片以及网页端的访问地址都与原先一致。
+本项目把 autopcr 移入独立解释器运行的子进程，在 HoshinoBot 一侧只保留消息收发与权限判定。
 
 ## 架构
 
 ```mermaid
 %% 每个进程只用一个节点：subgraph 内的节点一旦有指向外部的连线，
-%% 其 direction 就会被忽略，内部布局不再可控。
+%% 其 direction 就会被忽略，内部布局即不可控。
 %% 标签需保持简短：GitHub 以自身配置渲染，过长的行会在词中间折断。
 flowchart LR
     subgraph host["HoshinoBot 进程 · Python 3.8"]
@@ -37,15 +37,15 @@ flowchart LR
     hbot -.->|"网页请求流式转发"| wrap
 ```
 
-autopcr 与命令实现同在 wrapper 进程内，彼此为直接调用，不经过进程边界。
+下文把运行在 HoshinoBot 进程内的部分称为兼容层，把运行 autopcr 的子进程称为 wrapper。autopcr 与命令实现同在 wrapper 进程内，彼此为直接调用，不经过进程边界。
 
 两个进程通过回环地址上的 TCP 连接通信。兼容层监听由系统分配的端口，wrapper 启动后反向连接，端口与共享密钥经环境变量传递。连接建立时双方各自发出随机挑战并以 HMAC-SHA256 应答，一个往返完成相互认证。
 
-链路上同时存在两个方向的调用：兼容层把消息事件送往 wrapper，wrapper 请求兼容层发送消息、查询群成员、上传文件。消息按请求编号多路复用，因此多条命令可以并发处理，一条耗时较长的命令不会阻塞其他命令。
+链路上同时存在两个方向的调用：兼容层把消息事件送往 wrapper，wrapper 请求兼容层发送消息、查询群成员、上传文件。消息按请求编号多路复用，多条命令可以并发处理，一条耗时较长的命令不会阻塞其他命令。
 
-消息内容与权限判定在事件产生时一次求出并随事件下发，wrapper 读取这些内容不产生往返。发送消息不等待回执，与宿主框架自身的行为一致。
+消息内容与权限判定在事件产生时一次求出并随事件下发，wrapper 读取这些内容不产生往返。发送消息不等待回执。
 
-网页端由 wrapper 进程提供服务，兼容层在 `/daily` 路径下把请求原样转发过去，因此访问地址仍是宿主框架的地址。转发以流式进行，服务端推送的验证码事件能够即时到达浏览器。
+网页端由 wrapper 进程提供服务，兼容层在 `/daily` 路径下把请求原样转发过去，对外地址即宿主框架自身的地址。转发以流式进行，服务端推送的验证码事件能够即时到达浏览器。
 
 ## 部署
 
@@ -53,7 +53,7 @@ autopcr 与命令实现同在 wrapper 进程内，彼此为直接调用，不经
 
 首次启动时会自动取得 autopcr 源码、创建运行环境、安装依赖并下载网页端前端资源。该过程在后台进行，不阻塞机器人启动，期间收到的命令会提示服务尚未就绪。准备进度与失败原因均记录在日志中。
 
-自动准备需要 `git`，以及 `uv` 或一个 Python 3.10 解释器之一。日志会在启动时列出这些程序的可用状况。
+自动准备需要 `git`，以及 `uv` 与 Python 3.10 解释器两者中的至少一项。启动时的日志会列出这些程序的可用状况。
 
 ### 自行管理环境
 
@@ -72,15 +72,36 @@ PYTHON = ".venv-autopcr/bin/python"
 
 网页端的前端资源不随源码分发，需在 autopcr 目录下执行一次 `python _download_web.py` 取得。缺少该资源时接口仍可用，页面会返回 404。
 
+### 网络受限时自行放置源码
+
+自动准备通过 `git clone` 取得源码。若无法访问该仓库，可自行下载 autopcr 源码并解压到 `MANAGED_ROOT` 指向的位置（默认 `<插件目录>/.autopcr`），启动时会直接使用它，无需 git。此时源码不会被自动更新，需要升级时自行替换。
+
+目录中应直接包含 `autopcr` 包与 `requirements.txt`。从压缩包解压常会多出一层目录，此时启动日志会指出源码的实际位置。
+
 ### 数据位置
 
-账号配置、母数据与运行结果位于 autopcr 源码目录下的 `cache` 与 `result`，自动准备时即 `<项目>/.autopcr/`。备份账号时取 `cache` 目录。
+autopcr 把运行数据存放在其源码目录旁，与源码同级：
+
+| 目录 | 内容 | 迁移 |
+|---|---|---|
+| `cache/` | 账号配置、母数据、登录凭据 | 必须保留 |
+| `result/` | 历次运行结果 | 保留则历史报告可查 |
+| `log/` | 运行日志 | 无需保留 |
+| `data/` | 反混淆表与字体 | 随源码分发，无需保留 |
 
 源码更新只做快进式合并，且在检测到本地改动时跳过，不会触碰上述目录。
 
+### 从同进程部署迁移
+
+原先 autopcr 作为插件运行时，上述目录位于其插件目录内。两种迁移方式：
+
+**沿用原目录**：把 `AUTOPCR_ROOT` 指向原插件目录，数据不必移动。同时从 `MODULES_ON` 中移除原插件，宿主框架只加载该清单中的模块，留在 `hoshino/modules/` 内的原目录不会被加载。
+
+**复制到新位置**：把原插件目录下的 `cache` 与 `result` 复制到新的 autopcr 源码目录下，随后移除原插件。
+
 ### 配置
 
-配置写在宿主框架的配置目录中，与其他插件一致。把仓库内的 `_config_example.py` 复制为 `hoshino/config/autopcr_hoshino.py` 后按需修改，全部项均可省略：
+配置写在宿主框架的配置目录中。把仓库内的 `_config_example.py` 复制为 `hoshino/config/autopcr_hoshino.py` 后按需修改，全部项均可省略：
 
 ```python
 # hoshino/config/autopcr_hoshino.py
@@ -104,6 +125,8 @@ AUTO_UPDATE = True
 | `WEB_PREFIX` | `/daily` | 网页端路径前缀 |
 | `WEB_HOST` | `127.0.0.1` | wrapper 网页端监听地址 |
 | `WEB_PORT` | `0` | wrapper 网页端端口，`0` 表示由系统分配 |
+| `WEB_BACKLOG` | `128` | wrapper 网页端监听队列长度，一般无需调整 |
+| `ENABLE_AUTOPCR` | `True` | 是否启动 autopcr。关闭后 wrapper 仅保留通信能力，用于排障 |
 | `RESTART_DELAY` | `5` | wrapper 退出后的重启间隔秒数，连续失败时逐次加倍 |
 | `MAX_RESTART_DELAY` | `300` | 重启间隔的上限秒数 |
 | `HEALTHY_UPTIME` | `60` | 运行超过该秒数即视为正常，重启间隔随之重置 |
@@ -111,13 +134,13 @@ AUTO_UPDATE = True
 | `AUTOPCR_PUBLIC_ADDRESS` | 自动探测 | 网页端对外地址，用于生成配置页与验证码链接 |
 | `AUTOPCR_USE_HTTPS` | `False` | 对外地址是否使用 HTTPS |
 
-配置模块不存在时使用默认值，与宿主框架对缺失配置的处理一致。配置项写成空字符串等同于未设置，回落到默认值。
+配置模块不存在时全部配置项取默认值。配置项写成空字符串等同于未设置，同样回落到默认值。
 
-**环境变量优先于配置模块**，便于在容器部署中临时覆盖，也是把配置传入 wrapper 进程的途径。变量名为配置项加 `AUTOPCR_HOSHINO_` 前缀，例如 `AUTOPCR_ROOT` 对应 `AUTOPCR_HOSHINO_AUTOPCR_ROOT`；`AUTOPCR_PUBLIC_ADDRESS` 与 `AUTOPCR_USE_HTTPS` 沿用 autopcr 自身的变量名，不加前缀。autopcr 自身的其他环境变量原样透传给 wrapper 进程。
+**环境变量优先于配置模块**。wrapper 在独立进程中运行，其配置经环境变量传入，因此配置模块中与网页端相关的项会在启动子进程时一并注入。变量名为配置项加 `AUTOPCR_HOSHINO_` 前缀，例如 `AUTOPCR_ROOT` 对应 `AUTOPCR_HOSHINO_AUTOPCR_ROOT`；`AUTOPCR_PUBLIC_ADDRESS` 与 `AUTOPCR_USE_HTTPS` 沿用 autopcr 自身的变量名，不加前缀。autopcr 自身的其他环境变量原样透传给 wrapper 进程。
 
 ## 命令
 
-命令集与原先一致，发送 `#帮助` 可查看完整说明。工具类命令的形态为：
+发送 `#帮助` 可查看完整的指令说明。工具类命令的形态为：
 
 ```
 #[导出][群]<工具名> [昵称] [参数...]
@@ -129,21 +152,28 @@ AUTO_UPDATE = True
 
 ```bash
 make venv-autopcr    # 创建运行 autopcr 的环境
-make venv-hoshino    # 创建模拟宿主框架的环境，仅验证需要
-make check           # 静态检查、双环境语法检查、全部实测
+make venv-hoshino    # 创建模拟宿主框架的环境，仅测试需要
+make check           # 静态检查、双环境语法检查、全部测试
 make test-autopcr    # 拉起真实的 autopcr 验证网页端与转发
 make test-provision  # 从零取得源码、建环境并拉起 wrapper
 ```
 
-实测各自覆盖一个方面：
+各项测试覆盖的方面如下：
 
 - `tests/settings_check.py` 验证配置模块与环境变量的取值、优先级、大小写宽容，以及配置缺失时的行为。
+- `tests/source_check.py` 验证自行放置的源码被接受、内容不完整时的提示，以及源码位置不会被宿主框架扫描到。
 - `tests/session_check.py` 验证会话在命令返回后仍可用、保留期结束后被回收、以及容量上限生效。
 - `tests/cross_env_check.py` 由 Python 3.8 拉起真实的 wrapper 子进程，验证认证、请求响应、兆字节消息、事件分发、并发处理、密钥拒绝与崩溃重启。
-- `tests/proxy_check.py` 在 Quart 0.14 上验证转发，重点是事件流边收边发而非整体缓冲。
-- `tests/hoshino_load_check.py` 在临时目录中搭建最小的 HoshinoBot 部署，验证模块加载、服务注册、命令触发器、前缀匹配优先级，以及配置目录中的配置确实生效。
+- `tests/proxy_check.py` 在 Quart 0.14 上验证转发，其中事件流须边收边发而非整体缓冲。
+- `tests/hoshino_load_check.py` 在临时目录中搭建最小的 HoshinoBot 部署，验证模块加载、服务注册、命令触发器、前缀匹配优先级、配置确实生效，以及 autopcr 自带的 `server.py` 与未启用的插件目录都不被加载。
 - `tests/orphan_check.py` 强制终止宿主进程，验证 wrapper 随之退出而非成为孤儿进程。
 - `tests/autopcr_boot_check.py` 启动真实的 autopcr，验证网页端可用、端口上报、经转发端点的访问以及注册接口的号码校验。
 - `tests/provision_check.py` 从零取得源码、创建环境、安装依赖，并用该环境拉起 wrapper。
 
-`make test` 涵盖的前六项不需要 autopcr；`test-autopcr` 需要现成的 autopcr 源码，`test-provision` 需要 `git` 与可克隆的仓库。实测均不改动参考仓库，产物写入系统临时目录。
+`make test` 涵盖的前七项不需要 autopcr；`test-autopcr` 需要现成的 autopcr 源码，`test-provision` 需要 `git` 与可克隆的仓库。测试均不改动参考仓库，产物写入系统临时目录。
+
+## 许可
+
+本项目以 [CC BY-NC-SA 4.0](LICENSE) 发布。命令实现自 autopcr 移植而来，其许可要求衍生作品采用相同条款：禁止商业用途，再分发时须以相同许可发布。
+
+本项目不包含 HoshinoBot 的代码，仅作为其插件运行。

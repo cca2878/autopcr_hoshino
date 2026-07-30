@@ -8,7 +8,7 @@ HOSHINO_ROOT ?= ../ref/HoshinoBot
 help:
 	@echo "lint          静态检查"
 	@echo "compile       在两套环境下分别做语法检查"
-	@echo "test          运行不依赖 autopcr 的实测"
+	@echo "test          运行不依赖 autopcr 的测试"
 	@echo "test-autopcr  拉起真实的 autopcr 并验证网页端与转发"
 	@echo "test-provision 从零取得源码、建环境并拉起 wrapper"
 	@echo "check         lint + compile + test"
@@ -23,8 +23,11 @@ compile:
 	$(PYTHON_HOSHINO) -m compileall -q hbot protocol catalog.py entry.py __init__.py tests
 	$(PYTHON_AUTOPCR) -m compileall -q wrapper protocol catalog.py __init__.py
 
+# 把参考源码位置传给需要它们的测试；未提供时相应测试会自行跳过。
+test: export AUTOPCR_HOSHINO_TEST_HOSHINO = $(abspath $(HOSHINO_ROOT))
 test:
 	$(PYTHON_HOSHINO) tests/settings_check.py
+	$(PYTHON_HOSHINO) tests/source_check.py
 	$(PYTHON_HOSHINO) tests/session_check.py
 	$(PYTHON_HOSHINO) tests/cross_env_check.py
 	$(PYTHON_HOSHINO) tests/proxy_check.py

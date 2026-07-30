@@ -25,7 +25,7 @@ class AuthenticationError(ProtocolError):
 
 
 def generate_key() -> str:
-    """生成共享密钥，以十六进制字符串形式返回，便于放入环境变量。"""
+    """生成共享密钥，以十六进制字符串形式返回，可直接作为环境变量的值。"""
     return os.urandom(CHALLENGE_SIZE).hex()
 
 

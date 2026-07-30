@@ -1,4 +1,4 @@
-"""自动准备实测。
+"""自动准备测试。
 
 在装有宿主框架依赖的解释器（Python 3.8）中运行，从零开始取得 autopcr 源码、
 创建运行环境并安装依赖，最后拉起 wrapper 验证其可用，据此确认部署只需放好插件目录。
@@ -8,11 +8,14 @@
 """
 import asyncio
 import os
+import pathlib
 import shutil
 import sys
 import tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 failures = []
 
@@ -30,10 +33,15 @@ async def handle_callback(method, params):
 
 
 async def main():
+    from autopcr_hoshino.hbot import config, provision
+    from autopcr_hoshino.hbot.supervisor import Supervisor
+
     workspace = tempfile.mkdtemp(prefix="provision-check-")
-    source_repo = os.getenv(
-        "AUTOPCR_HOSHINO_PROVISION_FROM", "/workspaces/go-autopcr/ref/autopcr_latest"
-    )
+    # 默认从上游仓库克隆；指定本地仓库可避免依赖外网。
+    source_repo = os.getenv("AUTOPCR_HOSHINO_PROVISION_FROM", "").strip()
+    if not source_repo:
+        local = os.path.join(os.path.dirname(PROJECT_ROOT), "ref", "autopcr_latest")
+        source_repo = local if os.path.isdir(local) else config.autopcr_repo()
 
     # 准备目标与解释器位置都指向临时目录，避免动到既有环境。
     os.environ["AUTOPCR_HOSHINO_AUTOPCR_REPO"] = source_repo
@@ -43,9 +51,6 @@ async def main():
     os.environ.pop("AUTOPCR_HOSHINO_PYTHON", None)
     os.environ["AUTOPCR_HOSHINO_ENABLE_AUTOPCR"] = "false"
 
-    from autopcr_hoshino.hbot import provision
-    from autopcr_hoshino.hbot.supervisor import Supervisor
-
     print("[1] 外部程序可用性")
     print(f"  {provision.describe_requirements()}")
     check(provision.find_executable("git") is not None, "git 可用")
@@ -54,7 +59,7 @@ async def main():
     try:
         print("\n[2] 取得源码并创建运行环境")
         source, python = await provision.provision()
-        check(os.path.isdir(os.path.join(source, "autopcr")), f"源码已就位于 {source}")
+        check(provision.is_valid_source(pathlib.Path(source)), f"源码已就位于 {source}")
         check(os.path.exists(python), f"解释器已就位于 {python}")
 
         version = await provision._run_checked(

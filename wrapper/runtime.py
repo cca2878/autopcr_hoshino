@@ -41,9 +41,9 @@ def _bind_web_socket() -> Tuple[socket.socket, int]:
 def _install_register_guard(app, is_valid_qq: Callable) -> None:
     """在注册接口前加一道号码校验。
 
-    autopcr 自带的校验会从其包外反向导入宿主插件中的函数，那种导入形式要求 autopcr
-    作为子包存在，在独立进程中不成立。这里改为在应用层前置拦截，判定本身经通信链路
-    交由兼容层完成，效果与原先一致。
+    autopcr 自带的校验会从其包外反向导入宿主插件中的函数，该导入形式要求 autopcr
+    作为子包存在，在独立进程中不成立。校验改为在应用层前置拦截，判定经通信链路
+    交由兼容层完成。
     """
     from quart import request
 

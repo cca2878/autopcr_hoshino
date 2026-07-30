@@ -1,4 +1,4 @@
-"""autopcr 接入实测。
+"""autopcr 接入测试。
 
 在装有宿主框架依赖的解释器（Python 3.8）中运行，拉起启用了 autopcr 的 wrapper 子进程，
 验证：
@@ -6,12 +6,14 @@
 * autopcr 能在 wrapper 进程中被导入并完成网页端启动。
 * 实际监听端口能上报回兼容层。
 * 网页端能够响应请求，且能经由转发端点访问。
+* 注册接口拒绝不在机器人所在群内的号码。
 
-需要通过 ``AUTOPCR_HOSHINO_AUTOPCR_ROOT`` 指定 autopcr 源码位置。
-母数据下载在后台进行，本测试不等待其完成。
+autopcr 源码由 ``AUTOPCR_HOSHINO_AUTOPCR_ROOT`` 指定，默认取自动准备的位置；
+未找到时跳过。母数据下载在后台进行，本测试不等待其完成。
 """
 import asyncio
 import os
+import pathlib
 import socket
 import sys
 
@@ -21,7 +23,11 @@ from autopcr_hoshino.hbot.callbacks import CallbackHandler  # noqa: E402
 from autopcr_hoshino.hbot.proxy import WebProxy  # noqa: E402
 from autopcr_hoshino.hbot.supervisor import Supervisor  # noqa: E402
 
-DEFAULT_AUTOPCR_ROOT = "/workspaces/go-autopcr/ref/autopcr_latest"
+#: autopcr 源码位置。由 ``AUTOPCR_HOSHINO_AUTOPCR_ROOT`` 指定，
+#: 未指定时使用自动准备的默认位置。
+DEFAULT_AUTOPCR_ROOT = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".autopcr"
+)
 
 failures = []
 
@@ -149,9 +155,12 @@ async def check_through_proxy(supervisor):
 
 async def main():
     autopcr_root = os.getenv("AUTOPCR_HOSHINO_AUTOPCR_ROOT", DEFAULT_AUTOPCR_ROOT)
-    if not os.path.isdir(os.path.join(autopcr_root, "autopcr")):
-        print(f"未找到 autopcr 源码：{autopcr_root}")
-        return 1
+    from autopcr_hoshino.hbot import provision
+
+    if not provision.is_valid_source(pathlib.Path(autopcr_root)):
+        print(f"未找到可用的 autopcr 源码：{autopcr_root}，跳过本测试。")
+        print("可通过 AUTOPCR_HOSHINO_AUTOPCR_ROOT 指定其位置。")
+        return 0
     os.environ["AUTOPCR_HOSHINO_AUTOPCR_ROOT"] = autopcr_root
     os.environ["AUTOPCR_HOSHINO_ENABLE_AUTOPCR"] = "true"
 

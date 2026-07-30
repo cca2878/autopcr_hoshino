@@ -1,4 +1,4 @@
-"""宿主框架加载实测。
+"""宿主框架加载测试。
 
 在装有宿主框架依赖的解释器（Python 3.8）中运行，在临时目录中搭建一份最小的
 HoshinoBot 部署，把本项目作为模块加载，验证：
@@ -6,18 +6,31 @@ HoshinoBot 部署，把本项目作为模块加载，验证：
 * 项目能被宿主框架的模块加载流程正常导入。
 * 服务与全部命令触发器完成注册。
 * 前缀触发器按最长前缀匹配，兜底前缀不会抢走更具体的命令。
-* 网页端转发端点已挂载到宿主框架的应用上。
+* 自动准备的源码目录不被当作插件加载。
+* 配置目录中的配置被读取，并决定转发端点的挂载路径。
 
 搭建过程不改动参考仓库，全部文件写入临时目录。
+需要一份 HoshinoBot 源码，由 ``AUTOPCR_HOSHINO_TEST_HOSHINO`` 指定；未找到时跳过。
 """
 import os
 import shutil
 import sys
 import tempfile
 
-HOSHINO_SOURCE = "/workspaces/go-autopcr/ref/HoshinoBot"
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 PROJECT_NAME = os.path.basename(PROJECT_ROOT)
+
+#: HoshinoBot 源码位置。本测试需要一份宿主框架源码来搭建临时部署，
+#: 由 ``AUTOPCR_HOSHINO_TEST_HOSHINO`` 指定，未指定时尝试项目同级的常见位置。
+HOSHINO_SOURCE = os.getenv("AUTOPCR_HOSHINO_TEST_HOSHINO", "").strip()
+if not HOSHINO_SOURCE:
+    for candidate in (
+        os.path.join(PROJECT_ROOT, "..", "ref", "HoshinoBot"),
+        os.path.join(PROJECT_ROOT, "..", "HoshinoBot"),
+    ):
+        if os.path.isdir(os.path.join(candidate, "hoshino")):
+            HOSHINO_SOURCE = os.path.abspath(candidate)
+            break
 
 #: 配置文件中使用的非默认路径前缀，用于检验配置确实生效。
 CUSTOM_WEB_PREFIX = "/pcrdaily"
@@ -53,6 +66,13 @@ def build_deployment(root):
         fp.write(f'WEB_PREFIX = "{CUSTOM_WEB_PREFIX}"\n')
         fp.write("AUTO_PROVISION = False\n")
 
+    # 放一个未列入启用清单的插件目录：使用者可能保留旧的 autopcr 插件以原位沿用其数据。
+    stale = os.path.join(root, "hoshino", "modules", "autopcr")
+    os.makedirs(os.path.join(stale, "autopcr"))
+    for name in ("__init__.py", "server.py"):
+        with open(os.path.join(stale, name), "w") as fp:
+            fp.write("raise RuntimeError('未启用的插件目录不应被加载')\n")
+
     # 以软链接引入项目本体，避免复制两套虚拟环境。
     os.symlink(PROJECT_ROOT, os.path.join(root, "hoshino", "modules", PROJECT_NAME))
     return root
@@ -61,18 +81,27 @@ def build_deployment(root):
 def make_fake_source():
     """在项目目录内放一个形似 autopcr 源码的目录，用于检验它不会被加载。
 
+    autopcr 源码根目录同时带有 __init__.py 与 server.py，后者是其作为宿主插件时的入口。
+    两者都写成导入即抛异常，一旦被宿主框架扫描到就会让加载失败。
+
     返回需要在测试结束时清理的路径，源码已存在时返回 ``None``。
     """
     fake = os.path.join(PROJECT_ROOT, ".autopcr")
     if os.path.exists(fake):
         return None
     os.makedirs(os.path.join(fake, "autopcr"))
-    with open(os.path.join(fake, "__init__.py"), "w") as fp:
-        fp.write("raise RuntimeError('该目录不应被宿主框架导入')\n")
+    for name in ("__init__.py", "server.py"):
+        with open(os.path.join(fake, name), "w") as fp:
+            fp.write("raise RuntimeError('该目录不应被宿主框架导入')\n")
     return fake
 
 
 def main():
+    if not HOSHINO_SOURCE or not os.path.isdir(os.path.join(HOSHINO_SOURCE, "hoshino")):
+        print("未找到 HoshinoBot 源码，跳过本测试。")
+        print("可通过 AUTOPCR_HOSHINO_TEST_HOSHINO 指定其位置。")
+        return 0
+
     # 宿主框架的工具模块会导入 matplotlib，其默认后端在无图形界面的环境中不可用。
     os.environ.setdefault("MPLBACKEND", "Agg")
 
@@ -135,12 +164,20 @@ def run(fake_source):
             f"「{text}」匹配到 {expected}，实得 {item.key}",
         )
 
-    print("\n[5] 自动准备的源码目录不被当作插件加载")
-    # autopcr 仓库根目录带有 __init__.py，若其目录名不以点开头就会被宿主框架导入。
-    loaded = [name for name in sys.modules if PROJECT_NAME in name and "autopcr" in name]
+    print("\n[5] autopcr 源码不被当作插件加载")
+    # 源码根目录带有 __init__.py 与 server.py，若被扫描到就会因抛异常而暴露。
+    loaded = [name for name in sys.modules if "autopcr" in name]
     check(
         not any(name.endswith(".autopcr") for name in loaded),
-        "源码目录未出现在已加载模块中",
+        "自动准备的源码目录未被导入",
+    )
+    check(
+        not any(name.endswith(".server") for name in loaded),
+        f"autopcr 自带的 server 未被导入，实得 {[n for n in loaded if n.endswith('.server')]}",
+    )
+    check(
+        "hoshino.modules.autopcr" not in sys.modules,
+        "未列入启用清单的旧插件目录未被加载",
     )
 
     print("\n[6] 宿主框架配置目录中的配置生效")
@@ -162,7 +199,7 @@ def run(fake_source):
     app = nonebot.get_bot().server_app
     rules = [str(rule) for rule in app.url_map.iter_rules()]
     matched = [r for r in rules if CUSTOM_WEB_PREFIX in r]
-    check(bool(matched), f"转发端点使用配置的前缀，实测规则 {matched}")
+    check(bool(matched), f"转发端点使用配置的前缀，实得规则 {matched}")
     check(
         not any(r == "/daily" for r in rules),
         "未使用默认前缀挂载",

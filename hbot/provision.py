@@ -96,27 +96,89 @@ def check_source_location(root: Path) -> None:
         )
 
 
+#: 判定一份目录是否为可用的 autopcr 源码所依据的文件。
+SOURCE_MARKERS = (
+    Path("autopcr") / "__init__.py",
+    Path("autopcr") / "http_server" / "httpserver.py",
+    Path("autopcr") / "module" / "accountmgr.py",
+    Path("requirements.txt"),
+)
+
+
+def missing_markers(root: Path) -> List[str]:
+    """列出使该目录不成为可用 autopcr 源码的缺失文件。"""
+    return [str(marker) for marker in SOURCE_MARKERS if not (root / marker).exists()]
+
+
+def is_valid_source(root: Path) -> bool:
+    """该目录是否为一份可用的 autopcr 源码。"""
+    return root.is_dir() and not missing_markers(root)
+
+
+def _describe_invalid_source(root: Path) -> str:
+    """说明目录为何不可用，并在可能时指出源码的实际位置。
+
+    从压缩包解压得到的源码常多套一层目录，这种情形单看缺失文件清单不易察觉。
+    """
+    detail = "目录 {} 中缺少 {}".format(root, "、".join(missing_markers(root)))
+    try:
+        nested = [child for child in root.iterdir() if is_valid_source(child)]
+    except OSError:
+        nested = []
+    if nested:
+        return (
+            f"{detail}。源码似位于其下一层的 {nested[0].name}，"
+            "请把该目录的内容上移，或直接指向它。"
+        )
+    return (
+        f"{detail}。若网络受限无法自动取得，可自行下载 autopcr 源码解压至该目录；"
+        "其中应直接包含 autopcr 包与 requirements.txt。"
+    )
+
+
 async def ensure_source(root: Path) -> Path:
-    """取得或更新 autopcr 源码，返回其所在目录。"""
+    """取得或更新 autopcr 源码，返回其所在目录。
+
+    目录中已有可用源码时直接使用，不要求它由 git 取得——网络受限时可自行下载放置，
+    此种情形下无法自动更新。目录为空时才会尝试克隆。
+    """
     check_source_location(root)
+
+    if is_valid_source(root):
+        if not (root / ".git").exists():
+            logger.info("使用已有的 autopcr 源码 %s（非 git 仓库，不做更新）", root)
+            return root
+        if not config.auto_update():
+            logger.info("autopcr 源码已存在，未启用自动更新")
+            return root
+        return await _update_source(root)
+
+    if root.exists() and any(root.iterdir()):
+        raise ProvisionError(_describe_invalid_source(root))
+
     git = find_executable("git")
     if git is None:
-        raise ProvisionError("未找到 git，无法取得 autopcr 源码")
+        raise ProvisionError(
+            "未找到 git，无法自动取得 autopcr 源码；"
+            f"可自行下载源码解压至 {root} 后重启"
+        )
+    root.parent.mkdir(parents=True, exist_ok=True)
+    command = [git, "clone", "--depth", "1"]
+    if config.autopcr_ref():
+        command += ["--branch", config.autopcr_ref()]
+    command += [config.autopcr_repo(), str(root)]
+    await _run_checked(command)
+    if not is_valid_source(root):
+        raise ProvisionError(_describe_invalid_source(root))
+    logger.info("已取得 autopcr 源码至 %s", root)
+    return root
 
-    if not (root / ".git").exists():
-        if root.exists() and any(root.iterdir()):
-            raise ProvisionError(f"目录 {root} 已存在且不是 git 仓库")
-        root.parent.mkdir(parents=True, exist_ok=True)
-        command = [git, "clone", "--depth", "1"]
-        if config.autopcr_ref():
-            command += ["--branch", config.autopcr_ref()]
-        command += [config.autopcr_repo(), str(root)]
-        await _run_checked(command)
-        logger.info("已取得 autopcr 源码至 %s", root)
-        return root
 
-    if not config.auto_update():
-        logger.info("autopcr 源码已存在，未启用自动更新")
+async def _update_source(root: Path) -> Path:
+    """把已有的 git 工作树快进到远端最新提交。"""
+    git = find_executable("git")
+    if git is None:
+        logger.warning("未找到 git，跳过 autopcr 源码更新")
         return root
 
     # 存在本地改动时不动源码：使用者可能正在调试。
