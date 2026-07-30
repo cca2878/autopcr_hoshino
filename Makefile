@@ -24,6 +24,7 @@ compile:
 	$(PYTHON_AUTOPCR) -m compileall -q wrapper protocol catalog.py __init__.py
 
 test:
+	$(PYTHON_HOSHINO) tests/settings_check.py
 	$(PYTHON_HOSHINO) tests/session_check.py
 	$(PYTHON_HOSHINO) tests/cross_env_check.py
 	$(PYTHON_HOSHINO) tests/proxy_check.py

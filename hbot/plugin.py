@@ -5,11 +5,10 @@
 """
 import asyncio
 import logging
-import os
 import socket
 
 from ..catalog import COMMAND_PREFIX, FULLMATCH_COMMANDS, PREFIX_COMMANDS, SV_HELP
-from . import config, provision
+from . import config, provision, settings
 from .callbacks import CallbackHandler
 from .event import SessionRegistry, build_payload
 from .proxy import WebProxy
@@ -25,7 +24,7 @@ def resolve_web_address() -> str:
 
     依次尝试环境变量、宿主框架配置与本机地址解析，均不可得时退回回环地址。
     """
-    address = os.getenv("AUTOPCR_PUBLIC_ADDRESS", "").strip()
+    address = settings.get("autopcr_public_address")
 
     if not address:
         try:
@@ -44,14 +43,8 @@ def resolve_web_address() -> str:
     if not address:
         address = "127.0.0.1"
 
-    use_https = os.getenv("AUTOPCR_USE_HTTPS", "false").lower() not in (
-        "0",
-        "false",
-        "no",
-        "",
-    )
-    scheme = "https://" if use_https else "http://"
-    return scheme + address + config.WEB_PATH_PREFIX + "/"
+    scheme = "https://" if settings.get_bool("autopcr_use_https", False) else "http://"
+    return scheme + address + config.web_path_prefix() + "/"
 
 
 def setup():
@@ -77,6 +70,7 @@ def setup():
         logger.info(
             "未指定 autopcr 位置，将自动准备（%s）", provision.describe_requirements()
         )
+    logger.info("配置来源：%s", settings.describe_source())
     supervisor = Supervisor(
         CallbackHandler(service, sessions, lambda: _state.get("supervisor")),
         provisioner=provisioner,
@@ -113,11 +107,11 @@ def setup():
 
     app = nonebot.get_bot().server_app
 
-    if config.WEB_PROXY_ENABLED:
-        proxy = WebProxy(lambda: supervisor.web_port, config.WEB_PATH_PREFIX)
+    if config.web_proxy_enabled():
+        proxy = WebProxy(lambda: supervisor.web_port, config.web_path_prefix())
         _state["proxy"] = proxy
         app.register_blueprint(proxy.blueprint())
-        logger.info("autopcr 网页端将由 %s 转发", config.WEB_PATH_PREFIX)
+        logger.info("autopcr 网页端将由 %s 转发", config.web_path_prefix())
 
     @on_startup
     async def start_wrapper():

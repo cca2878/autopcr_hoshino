@@ -57,12 +57,17 @@ autopcr 与命令实现同在 wrapper 进程内，彼此为直接调用，不经
 
 ### 自行管理环境
 
-指定 `AUTOPCR_HOSHINO_AUTOPCR_ROOT` 即视为自行管理，此时不会自动取得源码或改动环境：
+设置 `AUTOPCR_ROOT` 即视为自行管理，此时不会自动取得源码或改动环境：
 
 ```bash
 uv venv --python 3.10 .venv-autopcr
 uv pip install --python .venv-autopcr/bin/python -r <autopcr 目录>/requirements.txt
-export AUTOPCR_HOSHINO_AUTOPCR_ROOT=/path/to/autopcr
+```
+
+```python
+# hoshino/config/autopcr_hoshino.py
+AUTOPCR_ROOT = "/path/to/autopcr"
+PYTHON = ".venv-autopcr/bin/python"
 ```
 
 网页端的前端资源不随源码分发，需在 autopcr 目录下执行一次 `python _download_web.py` 取得。缺少该资源时接口仍可用，页面会返回 404。
@@ -75,27 +80,40 @@ export AUTOPCR_HOSHINO_AUTOPCR_ROOT=/path/to/autopcr
 
 ### 配置
 
-| 环境变量 | 默认值 | 说明 |
-|---|---|---|
-| `AUTOPCR_HOSHINO_AUTO_PROVISION` | `true` | 未指定源码位置时是否自动准备 |
-| `AUTOPCR_HOSHINO_AUTOPCR_REPO` | `https://github.com/cc004/autopcr` | 自动准备时使用的仓库 |
-| `AUTOPCR_HOSHINO_AUTOPCR_REF` | 空 | 检出的分支或标签，留空则用远端默认分支 |
-| `AUTOPCR_HOSHINO_AUTO_UPDATE` | `false` | 每次启动是否尝试更新源码 |
-| `AUTOPCR_HOSHINO_MANAGED_ROOT` | `<项目>/.autopcr` | 自动准备时源码与数据的位置 |
-| `AUTOPCR_HOSHINO_MANAGED_VENV` | `<项目>/.venv-autopcr` | 自动准备时运行环境的位置 |
-| `AUTOPCR_HOSHINO_AUTOPCR_ROOT` | 空 | 自行管理时的 autopcr 源码根目录 |
-| `AUTOPCR_HOSHINO_PYTHON` | `<项目>/.venv-autopcr/bin/python` | 自行管理时运行 wrapper 的解释器 |
-| `AUTOPCR_HOSHINO_VERIFY_REGISTER` | `true` | 网页端注册是否要求号码在机器人所在的群内 |
-| `AUTOPCR_HOSHINO_WEB_PROXY` | `true` | 是否在宿主框架上提供网页端转发 |
-| `AUTOPCR_HOSHINO_WEB_PREFIX` | `/daily` | 网页端路径前缀 |
-| `AUTOPCR_HOSHINO_WEB_PORT` | `0` | wrapper 网页端端口，`0` 表示由系统分配 |
-| `AUTOPCR_HOSHINO_RESTART_DELAY` | `5` | wrapper 退出后的重启间隔秒数，连续失败时逐次加倍 |
-| `AUTOPCR_HOSHINO_MAX_RESTART_DELAY` | `300` | 重启间隔的上限秒数 |
-| `AUTOPCR_HOSHINO_STARTUP_TIMEOUT` | `180` | 等待 wrapper 就绪的秒数 |
-| `AUTOPCR_PUBLIC_ADDRESS` | 自动探测 | 网页端对外地址，用于生成配置与验证码链接 |
-| `AUTOPCR_USE_HTTPS` | `false` | 对外地址是否使用 HTTPS |
+配置写在宿主框架的配置目录中，与其他插件一致。把仓库内的 `_config_example.py` 复制为 `hoshino/config/autopcr_hoshino.py` 后按需修改，全部项均可省略：
 
-autopcr 自身的环境变量原样透传给 wrapper 进程。
+```python
+# hoshino/config/autopcr_hoshino.py
+AUTOPCR_ROOT = "/srv/autopcr"
+AUTO_UPDATE = True
+```
+
+| 配置项 | 默认值 | 说明 |
+|---|---|---|
+| `AUTO_PROVISION` | `True` | 未设置 `AUTOPCR_ROOT` 时是否自动准备 |
+| `AUTOPCR_REPO` | `https://github.com/cc004/autopcr` | 自动准备时使用的仓库 |
+| `AUTOPCR_REF` | 空 | 检出的分支或标签，留空则用远端默认分支 |
+| `AUTO_UPDATE` | `False` | 每次启动是否尝试更新源码 |
+| `MANAGED_ROOT` | `.autopcr` | 自动准备时源码与数据的位置 |
+| `MANAGED_VENV` | `.venv-autopcr` | 自动准备时运行环境的位置 |
+| `AUTOPCR_PYTHON_VERSION` | `3.10` | 自动准备运行环境时使用的 Python 版本 |
+| `AUTOPCR_ROOT` | 空 | 自行管理时的 autopcr 源码根目录 |
+| `PYTHON` | `.venv-autopcr/bin/python` | 自行管理时运行 wrapper 的解释器 |
+| `VERIFY_REGISTER` | `True` | 网页端注册是否要求号码在机器人所在的群内 |
+| `WEB_PROXY` | `True` | 是否在宿主框架上提供网页端转发 |
+| `WEB_PREFIX` | `/daily` | 网页端路径前缀 |
+| `WEB_HOST` | `127.0.0.1` | wrapper 网页端监听地址 |
+| `WEB_PORT` | `0` | wrapper 网页端端口，`0` 表示由系统分配 |
+| `RESTART_DELAY` | `5` | wrapper 退出后的重启间隔秒数，连续失败时逐次加倍 |
+| `MAX_RESTART_DELAY` | `300` | 重启间隔的上限秒数 |
+| `HEALTHY_UPTIME` | `60` | 运行超过该秒数即视为正常，重启间隔随之重置 |
+| `STARTUP_TIMEOUT` | `180` | 等待 wrapper 就绪的秒数 |
+| `AUTOPCR_PUBLIC_ADDRESS` | 自动探测 | 网页端对外地址，用于生成配置页与验证码链接 |
+| `AUTOPCR_USE_HTTPS` | `False` | 对外地址是否使用 HTTPS |
+
+配置模块不存在时使用默认值，与宿主框架对缺失配置的处理一致。配置项写成空字符串等同于未设置，回落到默认值。
+
+**环境变量优先于配置模块**，便于在容器部署中临时覆盖，也是把配置传入 wrapper 进程的途径。变量名为配置项加 `AUTOPCR_HOSHINO_` 前缀，例如 `AUTOPCR_ROOT` 对应 `AUTOPCR_HOSHINO_AUTOPCR_ROOT`；`AUTOPCR_PUBLIC_ADDRESS` 与 `AUTOPCR_USE_HTTPS` 沿用 autopcr 自身的变量名，不加前缀。autopcr 自身的其他环境变量原样透传给 wrapper 进程。
 
 ## 命令
 
@@ -119,12 +137,13 @@ make test-provision  # 从零取得源码、建环境并拉起 wrapper
 
 实测各自覆盖一个方面：
 
+- `tests/settings_check.py` 验证配置模块与环境变量的取值、优先级、大小写宽容，以及配置缺失时的行为。
 - `tests/session_check.py` 验证会话在命令返回后仍可用、保留期结束后被回收、以及容量上限生效。
 - `tests/cross_env_check.py` 由 Python 3.8 拉起真实的 wrapper 子进程，验证认证、请求响应、兆字节消息、事件分发、并发处理、密钥拒绝与崩溃重启。
 - `tests/proxy_check.py` 在 Quart 0.14 上验证转发，重点是事件流边收边发而非整体缓冲。
-- `tests/hoshino_load_check.py` 在临时目录中搭建最小的 HoshinoBot 部署，验证模块加载、服务注册、命令触发器与前缀匹配优先级。
+- `tests/hoshino_load_check.py` 在临时目录中搭建最小的 HoshinoBot 部署，验证模块加载、服务注册、命令触发器、前缀匹配优先级，以及配置目录中的配置确实生效。
 - `tests/orphan_check.py` 强制终止宿主进程，验证 wrapper 随之退出而非成为孤儿进程。
 - `tests/autopcr_boot_check.py` 启动真实的 autopcr，验证网页端可用、端口上报、经转发端点的访问以及注册接口的号码校验。
 - `tests/provision_check.py` 从零取得源码、创建环境、安装依赖，并用该环境拉起 wrapper。
 
-`make test` 涵盖的前五项不需要 autopcr；`test-autopcr` 需要现成的 autopcr 源码，`test-provision` 需要 `git` 与可克隆的仓库。实测均不改动参考仓库，产物写入系统临时目录。
+`make test` 涵盖的前六项不需要 autopcr；`test-autopcr` 需要现成的 autopcr 源码，`test-provision` 需要 `git` 与可克隆的仓库。实测均不改动参考仓库，产物写入系统临时目录。

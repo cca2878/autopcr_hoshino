@@ -16,7 +16,7 @@ from typing import Any, Dict, Optional
 
 from ..protocol import Peer, generate_key, perform_handshake
 from ..protocol.peer import ConnectionClosed
-from . import config
+from . import config, settings
 
 logger = logging.getLogger("autopcr_hoshino.supervisor")
 
@@ -93,7 +93,7 @@ class Supervisor:
     async def wait_ready(self, timeout: Optional[float] = None) -> bool:
         """等待 wrapper 完成连接与认证。"""
         if timeout is None:
-            timeout = config.STARTUP_TIMEOUT
+            timeout = config.startup_timeout()
         try:
             await asyncio.wait_for(self._ready.wait(), timeout)
             return True
@@ -149,6 +149,9 @@ class Supervisor:
 
     def _child_environment(self, port: int) -> Dict[str, str]:
         env = dict(os.environ)
+        # wrapper 在独立进程中运行，其配置经环境变量传入，
+        # 因此配置文件中的内容需在此一并注入；已有的环境变量不被覆盖。
+        env.update(settings.as_environment())
         env["AUTOPCR_HOSHINO_RPC_PORT"] = str(port)
         env["AUTOPCR_HOSHINO_RPC_KEY"] = self._key
         # 共享密钥经环境变量传递。命令行参数在 /proc/<pid>/cmdline 中对本机所有用户可读，
@@ -196,15 +199,15 @@ class Supervisor:
         module = f"{config.PACKAGE_NAME}.wrapper"
         # 连续失败时逐次延长重启间隔，避免配置错误导致进程被反复拉起。
         # 一旦某次运行持续足够长，视为已恢复，间隔重置。
-        delay = config.RESTART_DELAY
+        delay = config.restart_delay()
 
         while not self._stopping:
             if await self._provision():
                 break
             logger.error("%s 秒后重试准备 autopcr 环境", delay)
             await asyncio.sleep(delay)
-            delay = min(delay * 2, config.MAX_RESTART_DELAY)
-        delay = config.RESTART_DELAY
+            delay = min(delay * 2, config.max_restart_delay())
+        delay = config.restart_delay()
 
         while not self._stopping:
             python = self._python()
@@ -225,15 +228,15 @@ class Supervisor:
             except OSError as exc:
                 logger.error("无法启动 wrapper：%s", exc)
                 await asyncio.sleep(delay)
-                delay = min(delay * 2, config.MAX_RESTART_DELAY)
+                delay = min(delay * 2, config.max_restart_delay())
                 continue
 
             returncode = await self._process.wait()
             if self._stopping:
                 return
 
-            if asyncio.get_event_loop().time() - started_at >= config.HEALTHY_UPTIME:
-                delay = config.RESTART_DELAY
+            if asyncio.get_event_loop().time() - started_at >= config.healthy_uptime():
+                delay = config.restart_delay()
             logger.error("wrapper 已退出（返回码 %s），%s 秒后重启", returncode, delay)
             await asyncio.sleep(delay)
-            delay = min(delay * 2, config.MAX_RESTART_DELAY)
+            delay = min(delay * 2, config.max_restart_delay())

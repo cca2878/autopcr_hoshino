@@ -1,10 +1,13 @@
 """兼容层配置。
 
-全部配置项通过环境变量提供，未设置时取默认值。
+取值来源与优先级见 :mod:`autopcr_hoshino.hbot.settings`。
 兼容层运行在宿主框架的解释器中，因此这里不得导入 wrapper 或 autopcr 的任何模块。
+
+需要在运行时读取的项以函数形式提供，使宿主框架的加载顺序不影响取值。
 """
-import os
 from pathlib import Path
+
+from . import settings
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
@@ -13,79 +16,97 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 PACKAGE_NAME = PROJECT_ROOT.name
 
 
-def _env(name: str, default: str = "") -> str:
-    return os.getenv(name, default).strip()
+# ---------------------------------------------------------------- 自动准备
 
 
-#: 未指定 autopcr 位置时，是否自动取得源码并准备运行环境。
-AUTO_PROVISION = _env("AUTOPCR_HOSHINO_AUTO_PROVISION", "true").lower() not in (
-    "0",
-    "false",
-    "no",
-)
+def auto_provision() -> bool:
+    """未指定 autopcr 位置时，是否自动取得源码并准备运行环境。"""
+    return settings.get_bool("auto_provision", True)
 
-#: 自动准备时使用的仓库地址。
-AUTOPCR_REPO = _env("AUTOPCR_HOSHINO_AUTOPCR_REPO", "https://github.com/cc004/autopcr")
 
-#: 自动准备时检出的分支或标签，留空则使用远端默认分支。
-AUTOPCR_REF = _env("AUTOPCR_HOSHINO_AUTOPCR_REF")
+def autopcr_repo() -> str:
+    """自动准备时使用的仓库地址。"""
+    return settings.get("autopcr_repo", "https://github.com/cc004/autopcr")
 
-#: 每次启动时是否尝试更新已取得的源码。默认关闭，避免上游改动在无人值守时生效。
-AUTO_UPDATE = _env("AUTOPCR_HOSHINO_AUTO_UPDATE", "false").lower() not in (
-    "0",
-    "false",
-    "no",
-    "",
-)
 
-#: 自动准备时源码的存放位置。账号数据与母数据位于其下的 cache 目录。
-MANAGED_ROOT = _env("AUTOPCR_HOSHINO_MANAGED_ROOT", str(PROJECT_ROOT / ".autopcr"))
+def autopcr_ref() -> str:
+    """自动准备时检出的分支或标签，留空则使用远端默认分支。"""
+    return settings.get("autopcr_ref")
 
-#: 自动准备时运行环境的存放位置。
-MANAGED_VENV = _env(
-    "AUTOPCR_HOSHINO_MANAGED_VENV", str(PROJECT_ROOT / ".venv-autopcr")
-)
 
-#: 自动准备运行环境时使用的 Python 版本。
-AUTOPCR_PYTHON_VERSION = _env("AUTOPCR_HOSHINO_AUTOPCR_PYTHON_VERSION", "3.10")
+def auto_update() -> bool:
+    """每次启动时是否尝试更新已取得的源码。
+
+    默认关闭：上游改动在无人值守时生效的风险高于收益。
+    """
+    return settings.get_bool("auto_update", False)
+
+
+def managed_root() -> str:
+    """自动准备时源码的存放位置。账号数据与母数据位于其下的 cache 目录。
+
+    默认值以点开头：宿主框架会导入插件目录下的每一个子目录，
+    而 autopcr 仓库根目录带有 ``__init__.py``，普通名字会被误当作插件。
+    """
+    return settings.get("managed_root", str(PROJECT_ROOT / ".autopcr"))
+
+
+def managed_venv() -> str:
+    """自动准备时运行环境的存放位置。"""
+    return settings.get("managed_venv", str(PROJECT_ROOT / ".venv-autopcr"))
+
+
+def autopcr_python_version() -> str:
+    """自动准备运行环境时使用的 Python 版本。"""
+    return settings.get("autopcr_python_version", "3.10")
+
+
+# ---------------------------------------------------------------- 自行管理
 
 
 def wrapper_python() -> str:
     """运行 wrapper 的解释器。该解释器所在环境需安装 autopcr 的依赖。"""
-    return _env(
-        "AUTOPCR_HOSHINO_PYTHON", str(PROJECT_ROOT / ".venv-autopcr" / "bin" / "python")
+    return settings.get(
+        "python", str(PROJECT_ROOT / ".venv-autopcr" / "bin" / "python")
     )
 
 
 def autopcr_root() -> str:
-    """autopcr 源码根目录，即包含 ``autopcr`` 包的那一层。"""
-    return _env("AUTOPCR_HOSHINO_AUTOPCR_ROOT")
+    """autopcr 源码根目录，即包含 ``autopcr`` 包的那一层。
+
+    指定该项即视为使用者自行管理环境，自动准备不再进行。
+    """
+    return settings.get("autopcr_root")
 
 
-# 以上两项在每次启动子进程时读取，而非在导入时固化，
-# 使宿主框架的加载顺序不影响取值。
+# ---------------------------------------------------------------- 进程与网络
 
-#: wrapper 意外退出后的重启间隔秒数。连续失败时按倍数延长，直至 :data:`MAX_RESTART_DELAY`。
-RESTART_DELAY = float(_env("AUTOPCR_HOSHINO_RESTART_DELAY", "5"))
 
-#: 重启间隔的上限秒数。
-MAX_RESTART_DELAY = float(_env("AUTOPCR_HOSHINO_MAX_RESTART_DELAY", "300"))
+def restart_delay() -> float:
+    """wrapper 意外退出后的重启间隔秒数。连续失败时按倍数延长。"""
+    return settings.get_float("restart_delay", 5.0)
 
-#: 一次运行持续超过该秒数即视为正常，重启间隔随之重置。
-HEALTHY_UPTIME = float(_env("AUTOPCR_HOSHINO_HEALTHY_UPTIME", "60"))
 
-#: 等待 wrapper 建立连接并完成认证的秒数。
-STARTUP_TIMEOUT = float(_env("AUTOPCR_HOSHINO_STARTUP_TIMEOUT", "180"))
+def max_restart_delay() -> float:
+    """重启间隔的上限秒数。"""
+    return settings.get_float("max_restart_delay", 300.0)
 
-#: 反向代理转发 autopcr 网页端时使用的路径前缀，需与 autopcr 自身的前缀一致。
-WEB_PATH_PREFIX = _env("AUTOPCR_HOSHINO_WEB_PREFIX", "/daily")
 
-#: 是否启用网页端反向代理。关闭后用户需直接访问 wrapper 监听的端口。
-WEB_PROXY_ENABLED = _env("AUTOPCR_HOSHINO_WEB_PROXY", "true").lower() not in (
-    "0",
-    "false",
-    "no",
-)
+def healthy_uptime() -> float:
+    """一次运行持续超过该秒数即视为正常，重启间隔随之重置。"""
+    return settings.get_float("healthy_uptime", 60.0)
 
-#: 转发给 wrapper 的额外环境变量名。autopcr 自身的配置项由此透传。
-PASSTHROUGH_ENV_PREFIXES = ("AUTOPCR_",)
+
+def startup_timeout() -> float:
+    """等待 wrapper 建立连接并完成认证的秒数。"""
+    return settings.get_float("startup_timeout", 180.0)
+
+
+def web_proxy_enabled() -> bool:
+    """是否在宿主框架上提供 autopcr 网页端的转发。"""
+    return settings.get_bool("web_proxy", True)
+
+
+def web_path_prefix() -> str:
+    """转发网页端时使用的路径前缀，需与 autopcr 自身的前缀一致。"""
+    return settings.get("web_prefix", "/daily")

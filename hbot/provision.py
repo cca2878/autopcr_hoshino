@@ -74,8 +74,31 @@ def find_executable(*names: str) -> Optional[str]:
 # ---------------------------------------------------------------- 源码
 
 
+def check_source_location(root: Path) -> None:
+    """确认源码位置不会被宿主框架当作插件加载。
+
+    宿主框架会导入插件目录下的每一个子目录，而 autopcr 仓库根目录带有 ``__init__.py``。
+    若源码落在本项目目录内且目录名不以点或下划线开头，它将被宿主框架在其自身的解释器中
+    导入，随即因缺少依赖而失败。以点或下划线开头的名字会被其模块扫描跳过。
+    """
+    root = root.resolve()
+    project = config.PROJECT_ROOT.resolve()
+    try:
+        relative = root.relative_to(project)
+    except ValueError:
+        return
+    first = relative.parts[0] if relative.parts else ""
+    if first and not first.startswith((".", "_")):
+        raise ProvisionError(
+            f"源码位置 {root} 在插件目录内且名称不以点或下划线开头，"
+            "会被宿主框架误当作插件加载。请改用以点开头的目录名，"
+            "或把它放到插件目录之外。"
+        )
+
+
 async def ensure_source(root: Path) -> Path:
     """取得或更新 autopcr 源码，返回其所在目录。"""
+    check_source_location(root)
     git = find_executable("git")
     if git is None:
         raise ProvisionError("未找到 git，无法取得 autopcr 源码")
@@ -85,14 +108,14 @@ async def ensure_source(root: Path) -> Path:
             raise ProvisionError(f"目录 {root} 已存在且不是 git 仓库")
         root.parent.mkdir(parents=True, exist_ok=True)
         command = [git, "clone", "--depth", "1"]
-        if config.AUTOPCR_REF:
-            command += ["--branch", config.AUTOPCR_REF]
-        command += [config.AUTOPCR_REPO, str(root)]
+        if config.autopcr_ref():
+            command += ["--branch", config.autopcr_ref()]
+        command += [config.autopcr_repo(), str(root)]
         await _run_checked(command)
         logger.info("已取得 autopcr 源码至 %s", root)
         return root
 
-    if not config.AUTO_UPDATE:
+    if not config.auto_update():
         logger.info("autopcr 源码已存在，未启用自动更新")
         return root
 
@@ -103,7 +126,7 @@ async def ensure_source(root: Path) -> Path:
         return root
 
     await _run_checked([git, "fetch", "--depth", "1", "origin"], root)
-    ref = config.AUTOPCR_REF or "HEAD"
+    ref = config.autopcr_ref() or "HEAD"
     # 只做快进：不改写历史，也不触碰未跟踪的账号数据。
     code, output = await _run([git, "merge", "--ff-only", "FETCH_HEAD"], root)
     if code != 0:
@@ -137,14 +160,14 @@ async def ensure_venv(source: Path, venv: Path) -> str:
 
     if not python.exists():
         if uv is not None:
-            await _run_checked([uv, "venv", "--python", config.AUTOPCR_PYTHON_VERSION, str(venv)])
+            await _run_checked([uv, "venv", "--python", config.autopcr_python_version(), str(venv)])
         else:
             base = find_executable(
-                "python" + config.AUTOPCR_PYTHON_VERSION, "python3", "python"
+                "python" + config.autopcr_python_version(), "python3", "python"
             )
             if base is None:
                 raise ProvisionError(
-                    f"未找到 uv，也未找到 Python {config.AUTOPCR_PYTHON_VERSION} 解释器，"
+                    f"未找到 uv，也未找到 Python {config.autopcr_python_version()} 解释器，"
                     "无法创建运行环境"
                 )
             logger.warning("未找到 uv，改用 %s 创建运行环境", base)
@@ -190,9 +213,9 @@ async def ensure_frontend(source: Path, python: str) -> None:
 
 async def provision() -> Tuple[str, str]:
     """准备源码与运行环境，返回源码目录与解释器路径。"""
-    root = Path(config.MANAGED_ROOT)
+    root = Path(config.managed_root())
     source = await ensure_source(root)
-    python = await ensure_venv(source, Path(config.MANAGED_VENV))
+    python = await ensure_venv(source, Path(config.managed_venv()))
     await ensure_frontend(source, python)
     return str(source), python
 
@@ -202,7 +225,7 @@ def is_managed() -> bool:
 
     显式指定了 autopcr 位置即视为使用者自行管理，此时不做任何准备工作。
     """
-    if not config.AUTO_PROVISION:
+    if not config.auto_provision():
         return False
     return not config.autopcr_root()
 
