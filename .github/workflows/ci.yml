@@ -1,0 +1,100 @@
+name: CI
+
+on:
+  push:
+    branches: [dev, main] # dev 为快照验证，main 为合并后的正式验证
+  pull_request:
+    branches: [main] # dev -> main 的 PR 门禁
+
+permissions:
+  contents: read
+
+concurrency:
+  # 按 ref 分组。push 与 pull_request 的 ref 不同，两轮检查互不取消；
+  # 若合入同一组，推送 dev 会取消开着的 PR 检查，令门禁停在 cancelled 上。
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  checks:
+    name: Lint · compile · tests
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        # 测试以 autopcr_hoshino 为包名导入项目，检出目录名需与之一致。
+        working-directory: autopcr_hoshino
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          path: autopcr_hoshino
+
+      # 运行器镜像不含 Python 3.8，两套解释器均由 uv 取得，
+      # 使检查不随镜像预装内容而变化。
+      - uses: astral-sh/setup-uv@v9
+        with:
+          enable-cache: true
+
+      - name: Create the two environments
+        run: |
+          uv venv --python 3.8 .venv-hoshino
+          uv venv --python 3.10 .venv-autopcr
+
+      # 转发检查需要两侧各自的 Quart。Quart 0.14 依赖 Jinja2 2.x 的 escape，
+      # 因此这里与 HoshinoBot 一样钉住 Jinja2 与 MarkupSafe，否则导入即失败。
+      - name: Install the dependencies the tests need
+        run: |
+          uv pip install --python .venv-hoshino/bin/python \
+            "quart==0.14.1" "Jinja2~=2.11.2" "MarkupSafe~=1.0" \
+            "werkzeug~=1.0.1" "wsproto~=0.15.0" "aiohttp~=3.8.1"
+          uv pip install --python .venv-autopcr/bin/python "quart~=0.19.1"
+
+      - name: Install ruff
+        run: |
+          uv tool install "ruff>=0.16,<0.17"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - run: make lint
+
+      - run: make compile
+
+      # 其中依赖 HoshinoBot 源码的一项会自行跳过，由下面的 integration 作业覆盖。
+      - run: make test
+
+  integration:
+    name: Host framework integration
+    # 仅在 PR 与 main 上运行：该作业需取得 HoshinoBot 源码并安装其全部依赖，
+    # 在 dev 的每次推送上重复这些工作并不划算。
+    #
+    # 本作业会在 dev 的推送中显示为 skipped，因此不要把它设为 main 的必需检查——
+    # 必需检查按提交与名称匹配而不区分事件，一旦跳过便无法满足。
+    if: github.event_name == 'pull_request' || github.ref_name == 'main'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          path: autopcr_hoshino
+
+      - uses: actions/checkout@v7
+        with:
+          repository: Ice9Coffee/HoshinoBot
+          path: HoshinoBot
+
+      - uses: astral-sh/setup-uv@v9
+        with:
+          enable-cache: true
+
+      - name: Create the host environment
+        run: |
+          cd autopcr_hoshino
+          uv venv --python 3.8 .venv-hoshino
+          uv venv --python 3.10 .venv-autopcr
+          uv pip install --python .venv-hoshino/bin/python \
+            -r "$GITHUB_WORKSPACE/HoshinoBot/requirements.txt"
+
+      # 该检查会在临时目录中搭建一份最小部署并真正执行框架的初始化，
+      # 以此覆盖模块加载、服务注册与配置生效。
+      - name: Run the host framework check
+        working-directory: autopcr_hoshino
+        env:
+          AUTOPCR_HOSHINO_TEST_HOSHINO: ${{ github.workspace }}/HoshinoBot
+        run: .venv-hoshino/bin/python tests/hoshino_load_check.py

@@ -3,7 +3,7 @@ PYTHON_AUTOPCR := .venv-autopcr/bin/python
 AUTOPCR_ROOT ?= ../ref/autopcr_latest
 HOSHINO_ROOT ?= ../ref/HoshinoBot
 
-.PHONY: help lint test test-autopcr test-provision check venv-autopcr venv-hoshino compile clean
+.PHONY: help lint test test-autopcr test-provision check require-dirname venv-autopcr venv-hoshino compile clean
 
 help:
 	@echo "lint          静态检查"
@@ -15,6 +15,12 @@ help:
 	@echo "venv-autopcr  创建运行 autopcr 的环境（部署所需）"
 	@echo "venv-hoshino  创建模拟宿主框架的环境（仅验证所需）"
 
+# 测试以 autopcr_hoshino 为包名导入项目，因此要求目录名与之一致。
+# 部署时目录名可任意，包名由运行时推导，此处的限制只影响测试。
+require-dirname:
+	@[ "$(notdir $(CURDIR))" = autopcr_hoshino ] || { \
+		echo "测试要求目录名为 autopcr_hoshino，当前为 $(notdir $(CURDIR))"; exit 1; }
+
 # 显式限定检查范围：即使从其他目录调用，也不会波及本项目之外的代码。
 lint:
 	ruff check $(CURDIR)
@@ -24,6 +30,7 @@ compile:
 	$(PYTHON_AUTOPCR) -m compileall -q wrapper protocol catalog.py __init__.py
 
 # 把参考源码位置传给需要它们的测试；未提供时相应测试会自行跳过。
+test: require-dirname
 test: export AUTOPCR_HOSHINO_TEST_HOSHINO = $(abspath $(HOSHINO_ROOT))
 test:
 	$(PYTHON_HOSHINO) tests/settings_check.py
@@ -34,10 +41,10 @@ test:
 	$(PYTHON_HOSHINO) tests/hoshino_load_check.py
 	$(PYTHON_HOSHINO) tests/orphan_check.py
 
-test-provision:
+test-provision: require-dirname
 	$(PYTHON_HOSHINO) tests/provision_check.py
 
-test-autopcr:
+test-autopcr: require-dirname
 	AUTOPCR_HOSHINO_AUTOPCR_ROOT=$(abspath $(AUTOPCR_ROOT)) \
 		$(PYTHON_HOSHINO) tests/autopcr_boot_check.py
 

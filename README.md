@@ -150,6 +150,8 @@ AUTO_UPDATE = True
 
 ## 开发与验证
 
+测试以 `autopcr_hoshino` 为包名导入项目，因此开发时目录名需与之一致；部署时目录名可任意，包名由运行时推导。
+
 ```bash
 make venv-autopcr    # 创建运行 autopcr 的环境
 make venv-hoshino    # 创建模拟宿主框架的环境，仅测试需要
@@ -169,6 +171,8 @@ make test-provision  # 从零取得源码、建环境并拉起 wrapper
 - `tests/orphan_check.py` 强制终止宿主进程，验证 wrapper 随之退出而非成为孤儿进程。
 - `tests/autopcr_boot_check.py` 启动真实的 autopcr，验证网页端可用、端口上报、经转发端点的访问以及注册接口的号码校验。
 - `tests/provision_check.py` 从零取得源码、创建环境、安装依赖，并用该环境拉起 wrapper。
+
+推送与合并请求会在 GitHub Actions 上运行 `lint`、双环境语法检查与前七项测试；需要 HoshinoBot 全量依赖的宿主框架检查只在合并请求与 `main` 上运行。
 
 `make test` 涵盖的前七项不需要 autopcr；`test-autopcr` 需要现成的 autopcr 源码，`test-provision` 需要 `git` 与可克隆的仓库。测试均不改动参考仓库，产物写入系统临时目录。
 
