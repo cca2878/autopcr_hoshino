@@ -30,7 +30,8 @@ jobs:
 
       # 运行器镜像不含 Python 3.8，两套解释器均由 uv 取得，
       # 使检查不随镜像预装内容而变化。
-      - uses: astral-sh/setup-uv@v9
+      # 该动作未提供 v9 这一可变主版本标签，只能引用确切版本。
+      - uses: astral-sh/setup-uv@v9.0.0
         with:
           enable-cache: true
 
@@ -79,7 +80,7 @@ jobs:
           repository: Ice9Coffee/HoshinoBot
           path: HoshinoBot
 
-      - uses: astral-sh/setup-uv@v9
+      - uses: astral-sh/setup-uv@v9.0.0
         with:
           enable-cache: true
 
